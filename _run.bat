@@ -1,4 +1,6 @@
 call python -m venv .venv
 call .venv\Scripts\activate.bat
-call python make-video.py
+call pip install --upgrade pip
+call pip install -r requirements.txt
+call python youtube-musicplayer-maker.py
 pause

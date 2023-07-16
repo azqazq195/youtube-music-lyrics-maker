@@ -1,7 +1,7 @@
 import subprocess
 import speech_recognition as sr
 import os
-import math
+import pylrc
 import shutil
 from pydub import AudioSegment
 
@@ -10,31 +10,52 @@ MUSIC_FOLDER = "./music"
 FONT_FOLDER = "./font"
 
 
-def convert_to_wav(input_file):
-    folder_path, file = os.path.split(input_file)
+def convert_to_wav(audio_file):
+    folder_path, file = os.path.split(audio_file)
     file_name, file_extension = os.path.splitext(file)
     output_file = os.path.join(folder_path, file_name + ".wav")
 
     if file_extension == '.mp3':
-        audio = AudioSegment.from_mp3(input_file)
+        audio = AudioSegment.from_mp3(audio_file)
     elif file_extension == '.wav':
-        audio = AudioSegment.from_wav(input_file)
+        audio = AudioSegment.from_wav(audio_file)
 
     audio.export(output_file, format='wav')
     return output_file
 
 
-def move_music_file_to_video_folder(input_file):
-    file = os.path.basename(input_file)
-    file_name, _ = os.path.splitext(file)
-    output_folder_path = os.path.join(VIDEO_FOLDER, file_name)
-    output_file = os.path.join(output_folder_path, "music.wav")
+def convert_to_srt(lrc_file):
+    with open(lrc_file, 'r', encoding='utf-8') as lrc:
+        lrc_string = ''.join(lrc.readlines())
+
+    subs = pylrc.parse(lrc_string)
+    srt = subs.toSRT()
+
+    srt_file = lrc_file.replace('.lrc', '.srt')
+    with open(srt_file, 'w', encoding='utf-8') as f:
+        f.write(srt)
+
+
+def move_files_to_video_folder(music_name):
+    output_folder_path = os.path.join(VIDEO_FOLDER, music_name)
+    output_music_file = os.path.join(output_folder_path, "music.wav")
+    output_lyrics_file = os.path.join(output_folder_path, "lyrics.srt")
+    output_album_art_file = os.path.join(output_folder_path, "album-art.jpg")
 
     if not os.path.exists(output_folder_path):
         os.makedirs(output_folder_path)
 
-    shutil.move(input_file, output_file)
-    return output_file
+    for file in os.listdir(MUSIC_FOLDER):
+        file_name, file_extension = os.path.splitext(file)
+        if file_name == music_name:
+            input_file = os.path.join(MUSIC_FOLDER, file)
+
+            if file_extension == ".wav":
+                shutil.move(input_file, output_music_file)
+            elif file_extension == ".srt":
+                shutil.move(input_file, output_lyrics_file)
+            elif file_extension == ".jpg":
+                shutil.copy(input_file, output_album_art_file)
 
 
 def split_wav_file(wav_file):
@@ -91,22 +112,28 @@ def recognize_audio_chunks(audio_chunks, language):
     return text
 
 
-def create_video(file_name, is_vertical=False):
-    audio_file = f"{MUSIC_FOLDER}/{file_name}.mp3"
-    image_file = f"{MUSIC_FOLDER}/{file_name}.jpg"
+def create_video(music_name, is_vertical=False):
+    print(os.getcwd())
+    audio_file = os.path.join(VIDEO_FOLDER, music_name, "music.wav")
+    image_file = os.path.join(VIDEO_FOLDER, music_name, "album-art.jpg")
+    # srt_file = os.path.join(VIDEO_FOLDER, music_name, "lyrics.srt")
+    srt_file = "video\\\\연인 - 박효신\\\\lyrics.srt"
+    print(audio_file)
+    print(image_file)
+    print(srt_file)
     font_file = f"{FONT_FOLDER}/NanumSquareNeo-Bold.ttf"
     font_size = 36
     font_padding = 10
 
     # Set image size based on orientation
     if is_vertical:
-        result_file = f"{file_name}-세로.mp4"
+        result_file = os.path.join(VIDEO_FOLDER, f"{music_name}-세로.mp4")
         art_scale = 700
         art_x_position_ratio = 2  # the smaller, the more to the left
         art_y_position_ratio = 8  # the smaller, the more to the top
         video_resolution = "1080x1920"
     else:
-        result_file = f"{file_name}-가로.mp4"
+        result_file = os.path.join(VIDEO_FOLDER, f"{music_name}-가로.mp4")
         art_scale = 700
         art_x_position_ratio = 7  # the smaller, the more to the left
         art_y_position_ratio = 2  # the smaller, the more to the top
@@ -121,22 +148,26 @@ def create_video(file_name, is_vertical=False):
         # Add background color
         f"color=s={video_resolution}:c=white[bg];"
         # Overlay album art on the background
-        f"[bg][fg]overlay=(main_w-overlay_w)/{art_x_position_ratio}:(main_h-overlay_h)/{art_y_position_ratio}[video];"
+        f"[bg][fg]overlay=(main_w-overlay_w)/{art_x_position_ratio}:(main_h-overlay_h)/{art_y_position_ratio},"
 
         # Add title text on top of the album art
-        f"[video]drawtext=fontfile={font_file}: "
-        f"text='{file_name}': "
+        f"drawtext=fontfile={font_file}: "
+        f"text='{music_name}': "
         f"fontsize={font_size}: fontcolor=black: "
         f"x=(w-{art_scale})/{art_x_position_ratio}+{font_padding}: "
-        f"y=(h-{art_scale})/{art_y_position_ratio}-text_h-{font_padding}"
+        f"y=(h-{art_scale})/{art_y_position_ratio}-text_h-{font_padding}[video];"
+
+        f"[video]subtitles=lyrics.srt"
     )
 
     command = [
-        "ffmpeg", "-i", audio_file, "-loop", "1", "-i", image_file, "-c:v",
+        "ffmpeg", "-i", audio_file,  "-i", image_file, "-loop", "1", "-c:v",
         "libx264", "-tune", "stillimage", "-c:a", "aac", "-b:a", "192k",
         "-filter_complex", filter_complex,
-        "-pix_fmt", "yuv420p", "-t", "30", "-shortest", result_file, "-y"
+        "-pix_fmt", "yuv420p",
+        "-t", "30", "-shortest", result_file, "-y"
     ]
+
     # -t 30 -y 지우기
 
     subprocess.run(command, check=True)
@@ -148,10 +179,12 @@ def create_video(file_name, is_vertical=False):
 
 
 if __name__ == "__main__":
-    input_file = f"{MUSIC_FOLDER}/연인 - 박효신.mp3"
-    wav_file = convert_to_wav(input_file)
-    wav_file = move_music_file_to_video_folder(wav_file)
-    chunk_files = split_wav_file(wav_file)
-    text = recognize_audio_chunks(chunk_files, 'ko-KR')
-    delete_files(chunk_files)
-    print(text)
+    music_name = "연인 - 박효신"
+    audio_file = f"{MUSIC_FOLDER}/{music_name}.mp3"
+    lrc_file = f"{MUSIC_FOLDER}/{music_name}.lrc"
+    convert_to_wav(audio_file)
+    convert_to_srt(lrc_file)
+    move_files_to_video_folder(music_name)
+
+    create_video(music_name)
+    # create_video(music_name, True)
